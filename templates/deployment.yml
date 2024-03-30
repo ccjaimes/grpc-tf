@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: simetrikgrpc-service
+spec:
+  type: LoadBalancer
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 50051
+  selector:
+    app: simetrikgrpc-pod
+---
+apiVersion: apps/v1
+kind: deployment
+metadata:
+  name: simetrikgrpc-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: simetrikgrpc-pod
+  template:
+    metadata:
+      labels:
+        app: simetrikgrpc-pod
+    spec:
+      containers:
+      - name: simetrikgrpc-container
+        image: changemeeeeeeeee
+        ports:
+        - containerPort: 50051
+        env:
+        - name: RUNNER
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
