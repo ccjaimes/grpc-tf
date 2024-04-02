@@ -1,0 +1,107 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Effect": "Allow",
+			"Action": [
+				"iam:CreateRole",
+				"iam:TagRole",
+				"iam:DeleteRole",
+				"iam:AttachRolePolicy",
+				"iam:PutRolePolicy",
+				"iam:GetRolePolicy",
+				"iam:PassRole",
+				"iam:ListRolePolicies",
+				"iam:ListAttachedRolePolicies",
+				"iam:ListInstanceProfilesForRole",
+				"iam:DeleteRolePolicy",
+				"iam:DetachRolePolicy",
+				"iam:DeleteServiceLinkedRole",
+				"iam:CreateServiceLinkedRole",
+				"logs:DescribeLogGroups",
+				"logs:CreateLogGroup",
+				"logs:DeleteLogGroup",
+				"logs:TagResource",
+				"logs:ListTagsLogGroup",
+				"logs:PutRetentionPolicy"
+			],
+			"Resource": [
+				"arn:aws:logs:*:*:log-group:*",
+				"arn:aws:iam::*:role/*"
+			]
+		},
+		{
+			"Effect": "Allow",
+			"Resource": [
+				"*"
+			],
+			"Action": [
+				"kms:TagResource",
+				"kms:CreateKey",
+				"kms:CreateAlias",
+				"kms:DeleteAlias",
+				"iam:CreatePolicy",
+				"iam:GetPolicy",
+				"iam:TagPolicy",
+				"iam:GetPolicyVersion",
+				"iam:ListPolicyVersions",
+				"iam:DeletePolicyVersion",
+				"iam:DeletePolicy",
+				"iam:CreateGroup",
+				"iam:DeleteGroup",
+				"iam:GetGroup",
+				"iam:ListGroups",
+				"ec2:DescribeLaunchTemplates",
+				"ec2:DescribeLaunchTemplateVersions",
+				"ec2:DeleteLaunchTemplate",
+				"ec2:RunInstances",
+				"eks:DescribeNodegroup",
+				"eks:DeleteNodegroup",
+				"iam:AttachGroupPolicy",
+				"iam:DetachGroupPolicy",
+				"iam:DeleteGroupPolicy",
+				"iam:ListAttachedGroupPolicies",
+				"ecr:CreateRepository",
+				"ecr:DescribeRepositories",
+				"ecr:DeleteRepository",
+				"ecr:ListTagsForResource",
+				"iam:CreatePolicyVersion",
+				"codebuild:*"
+		]
+		},
+		{
+			"Effect": "Allow",
+			"Resource": [
+				"arn:aws:eks:us-east-2:*:cluster/*"
+			],
+			"Action": [
+				"eks:CreateCluster",
+				"eks:DescribeCluster",
+				"eks:TagResource",
+				"eks:CreateNodegroup",
+				"eks:DeleteCluster"
+		]
+		},
+		{
+			"Effect": "Allow",
+			"Resource": [
+				"arn:aws:iam::*:oidc-provider/*"
+			],
+			"Action": [
+				"iam:GetOpenIDConnectProvider",
+				"iam:CreateOpenIDConnectProvider",
+				"iam:TagOpenIDConnectProvider",
+				"iam:DeleteOpenIDConnectProvider"
+			]
+		},
+		{
+			"Effect": "Allow",
+			"Resource": [
+				"arn:aws:ec2:us-east-2:*:launch-template/*"
+			],
+			"Action": [
+				"ec2:CreateLaunchTemplate"
+			]
+		}
+	]
+}

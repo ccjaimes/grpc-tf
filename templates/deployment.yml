@@ -1,20 +1,9 @@
-apiVersion: v1
-kind: Service
-metadata:
-  name: simetrikgrpc-service
-spec:
-  type: LoadBalancer
-  ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 50051
-  selector:
-    app: simetrikgrpc-pod
 ---
 apiVersion: apps/v1
-kind: deployment
+kind: Deployment
 metadata:
   name: simetrikgrpc-deployment
+  namespace: default
 spec:
   replicas: 3
   selector:
@@ -27,7 +16,7 @@ spec:
     spec:
       containers:
       - name: simetrikgrpc-container
-        image: changemeeeeeeeee
+        image: $$$$$$$$$$$$.dkr.ecr.us-east-2.amazonaws.com/simetrikgrpcrepo:1.1.0
         ports:
         - containerPort: 50051
         env:
@@ -35,3 +24,45 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simetrikgrpc-service
+  namespace: default
+spec:
+  type: ClusterIP
+  ports:
+  - protocol: TCP
+    port: 50051
+    targetPort: 50051
+  selector:
+    app: simetrikgrpc-pod
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simetrik-ab
+  namespace: default
+  annotations:
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/backend-protocol-version: "GRPC"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  tls:
+  - hosts:
+    - insert.hostname.here
+    secretName: sslCert
+  ingressClassName: alb
+  rules:
+    - host: insert.hostname.here
+      http:
+        paths:
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: simetrikgrpc-service
+                port:
+                  number: 50051

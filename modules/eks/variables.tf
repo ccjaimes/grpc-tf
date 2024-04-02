@@ -8,40 +8,19 @@ variable "privsub" {
   description = "Private subnet range available for eks cluster"
 }
 
-variable "codebuild_project_name" {
+variable "vpc_owner_id" {
   type        = string
-  description = "Codebuild Project name to handle app's CICD"
-  default     = "Simetrik-Codebuild"
+  description = "ID of the owner user of the VPC"
 }
 
-variable "github_repo" {
+variable "eks_cluster_name" {
   type        = string
-  description = "Github repo link with app code"
-  default     = "https://github.com/ccjaimes/grpc-py-test.git"
+  description = "Name of the EKS cluster"
+  default     = "grpc-test-eks"
 }
 
-variable "buildspec" {
+variable "k8s_version" {
   type        = string
-  description = "CICD pipeline in yml structure for CodeBuild to process"
-  default     = <<-EOF
-      version: 0.2
-
-      phases:
-        pre-build:
-          commands:
-            - echo "Setting ECR permissions"
-            - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-  build:
-        build:
-          commands:
-            - LATEST=git describe --tags --abbrev=0 
-            - docker build -t $IMAGE_REPO:$LATEST .
-        test:
-          commands:
-            - echo "Tests to be implemented in a future sprint!"
-            - echo "Tests passed!"
-        push:
-          commands:
-            - docker push $IMAGE_REPO:$LATEST
-    EOF
+  description = "The Kubernetes version our EKS cluster will use"
+  default     = "1.29"
 }

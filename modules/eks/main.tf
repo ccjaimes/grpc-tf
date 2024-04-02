@@ -1,15 +1,15 @@
 ### EKS Cluster Module
-
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "20.8.4"
+  version = "19.21.0"
 
-  cluster_name    = "grpc-test-eks"
-  cluster_version = "1.29"
+  cluster_name    = var.eks_cluster_name
+  cluster_version = var.k8s_version
 
   cluster_endpoint_private_access = true
   cluster_endpoint_public_access  = true
 
+  # These are imported from the Network module
   vpc_id     = var.vpc_id
   subnet_ids = var.privsub
 
@@ -19,6 +19,7 @@ module "eks" {
     disk_size = 50
   }
 
+  # This block defines the specifications of the instances hosting our cluster
   eks_managed_node_groups = {
     general = {
       desired_size = 1
@@ -32,24 +33,27 @@ module "eks" {
       instance_types = ["t3.small"]
       capacity_type  = "ON_DEMAND"
     }
+  }
 
-    spot = {
-      desired_size = 1
-      min_size     = 1
-      max_size     = 10
+  # This block links the permissions and roles from AWS with the internal K8s Auth ConfigMap
+  manage_aws_auth_configmap = true
+  aws_auth_roles = [
+    {
+      rolearn  = module.eks_admins_iam_role.iam_role_arn
+      username = module.eks_admins_iam_role.iam_role_name
+      groups   = ["system:masters"]
+    },
+  ]
 
-      labels = {
-        role = "spot"
-      }
-
-      taints = [{
-        key    = "market"
-        value  = "spot"
-        effect = "NO_SCHEDULE"
-      }]
-
-      instance_types = ["t3.micro"]
-      capacity_type  = "SPOT"
+  # This block creates a network rule for an open port to enable communication between the control plane and AWS LBC
+  node_security_group_additional_rules = {
+    ingress_allow_access_from_control_plane = {
+      type                       = "ingress"
+      protocol                   = "tcp"
+      from_port                  = 9443
+      to_port                    = 9443
+      source_node_security_group = true
+      description                = "Allow access from control plane to webhook port of AWS load balancer controller"
     }
   }
 
@@ -58,144 +62,159 @@ module "eks" {
   }
 }
 
-### IAM roles for CodeBuild
+###################################################################################################
+###################################################################################################
 
-data "aws_iam_policy_document" "assume_role" {
-  statement {
-    effect = "Allow"
+### Policy & Role creations to authenticate with EKS
+# Policy definition to authenticate with K8s internally (Use kubectl)
+module "allow_eks_access_iam_policy" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-policy"
+  version = "5.3.1"
 
-    principals {
-      type        = "Service"
-      identifiers = ["codebuild.amazonaws.com"]
-    }
+  name          = "allow-eks-access"
+  create_policy = true
 
-    actions = ["sts:AssumeRole"]
-  }
-}
-
-resource "aws_iam_role" "roledef" {
-  name               = "roledef"
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
-}
-
-data "aws_iam_policy_document" "permissions" {
-  statement {
-    effect = "Allow"
-
-    actions = [
-      "logs:CreateLogGroup",
-      "logs:CreateLogStream",
-      "logs:PutLogEvents",
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "eks:DescribeCluster",
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
     ]
+  })
+}
 
-    resources = ["*"]
-  }
+# Role definition that holds the previous policy and can be assigned to users, groups and Service Accounts
+module "eks_admins_iam_role" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+  version = "5.3.1"
 
-  statement {
-    effect = "Allow"
+  role_name         = "eks-admin"
+  create_role       = true
+  role_requires_mfa = false
 
-    actions = [
-      "ec2:CreateNetworkInterface",
-      "ec2:DescribeDhcpOptions",
-      "ec2:DescribeNetworkInterfaces",
-      "ec2:DeleteNetworkInterface",
-      "ec2:DescribeSubnets",
-      "ec2:DescribeSecurityGroups",
-      "ec2:DescribeVpcs",
+  custom_role_policy_arns = [module.allow_eks_access_iam_policy.arn]
+
+  trusted_role_arns = [
+    "arn:aws:iam::${var.vpc_owner_id}:root"
+  ]
+}
+
+# Policy definition to allow users to assume the role previously created
+module "allow_assume_eks_admins_iam_policy" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-policy"
+  version = "5.3.1"
+
+  name          = "allow-assume-eks-admin-iam-role"
+  create_policy = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "sts:AssumeRole",
+        ]
+        Effect   = "Allow"
+        Resource = module.eks_admins_iam_role.iam_role_arn
+      },
     ]
+  })
+}
 
-    resources = ["*"]
+# Create a group with the policy to assume K8s role to its members
+module "eks_admins_iam_group" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-group-with-policies"
+  version = "5.3.1"
+
+  name                              = "eks-admin"
+  attach_iam_self_management_policy = false
+  create_group                      = true
+  custom_group_policy_arns          = [module.allow_assume_eks_admins_iam_policy.arn]
+}
+
+data "aws_eks_cluster" "default" {
+  depends_on = [ module.eks.cluster_name ]
+  name = module.eks.cluster_name
+}
+
+# Authenticate with Kubernetes provider as a pre-requisite to link AWS policy and K8s Auth
+provider "kubernetes" {
+  host                   = data.aws_eks_cluster.default.endpoint
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.default.certificate_authority[0].data)
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.default.id]
+    command     = "aws"
   }
+}
 
-  statement {
-    effect    = "Allow"
-    resources = ["*"]
-    actions   = [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:CompleteLayerUpload",
-      "ecr:GetAuthorizationToken",
-      "ecr:InitiateLayerUpload",
-      "ecr:PutImage",
-      "ecr:UploadLayerPart"
-    ]
-  }
+###################################################################################################
+###################################################################################################
 
-  statement {
-    effect    = "Allow"
-    actions   = ["ec2:CreateNetworkInterfacePermission"]
-    resources = ["arn:aws:ec2:us-east-1:123456789012:network-interface/*"]
+### Load Balancer & IAM Access roles
+# Authenticate with helm provider to connect load balancer chart with our EKS cluster
+provider "helm" {
+  kubernetes {
+    host                   = data.aws_eks_cluster.default.endpoint
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.default.certificate_authority[0].data)
 
-    condition {
-      test     = "StringEquals"
-      variable = "ec2:Subnet"
-
-      values = [
-        aws_subnet.example1.arn,
-        aws_subnet.example2.arn,
-      ]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "ec2:AuthorizedService"
-      values   = ["codebuild.amazonaws.com"]
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.default.id]
+      command     = "aws"
     }
   }
 }
 
-resource "aws_iam_role_policy" "permissions_policy" {
-  role   = aws_iam_role.roledef.name
-  policy = data.aws_iam_policy_document.example.json
+# Define the Service Account role for the load balancer
+module "aws_load_balancer_controller_irsa_role" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "5.3.1"
+
+  role_name = "aws-load-balancer-controller"
+
+  attach_load_balancer_controller_policy = true
+
+  oidc_providers = {
+    ex = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:aws-load-balancer-controller"]
+    }
+  }
 }
 
-### ECR Registry
+# Implement helm's Load Balancer Controller integration for AWS
+resource "helm_release" "aws_load_balancer_controller" {
+  name = "aws-load-balancer-controller"
 
-resource "aws_ecr_repository" "Simetrik-ecr" {
-  name                 = "simetrikgrpc"
-  image_tag_mutability = "MUTABLE"
+  repository = "https://aws.github.io/eks-charts"
+  chart      = "aws-load-balancer-controller"
+  namespace  = "kube-system"
+  version    = "1.5.0"
 
-  image_scanning_configuration {
-    scan_on_push = false
-  }
-}
-
-### CodeBuild resource
-
-resource "aws_codebuild_project" "cicd" {
-  name         = var.codebuild_project_name
-  service_role = aws_iam_role.roledef.arn
-
-  environment {
-    compute_type = "BUILD_GENERAL1_SMALL"
-    image        = "docker:dind"
-    type         = "LINUX_CONTAINER"
-    environment_variable {
-        name = "AWS_DEFAULT_REGION"
-        value = "us-east-2"
-    }
-
-    environment_variable {
-        name = "AWS_ACCOUNT_ID"
-        value = "TODO"
-    }
-
-    environment_variable {
-        name = "IMAGE_REPO_URL"
-        value = aws_ecr_repository.Simetrik-ecr.repository_url
-    }
+  set {
+    name  = "replicaCount"
+    value = 1
   }
 
-  source {
-    type            = "GITHUB"
-    location        = var.github_repo
-    git_clone_depth = 1
-
-    buildspec = var.buildspec
+  set {
+    name  = "clusterName"
+    value = data.aws_eks_cluster.default.name
   }
 
-  artifacts {
-    type = "NO_ARTIFACTS"
+  set {
+    name  = "serviceAccount.name"
+    value = "aws-load-balancer-controller"
   }
 
-  source_version = "main"
+  set {
+    name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+    value = module.aws_load_balancer_controller_irsa_role.iam_role_arn
+  }
 }
